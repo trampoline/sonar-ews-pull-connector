@@ -18,7 +18,7 @@ module Sonar
       attr_reader :delete
 
       def parse(settings)
-        ["name", "repeat_delay", "url", "auth", "user", "password", "distinguished_folders", "batch_size", "delete"].each do |param|
+        ["name", "repeat_delay", "url", "auth", "user", "password", "distinguished_folders", "batch_size"].each do |param|
           raise Sonar::Connector::InvalidConfig.new("#{self.class}: param '#{param}' is blank") if settings[param].blank?
         end
         
