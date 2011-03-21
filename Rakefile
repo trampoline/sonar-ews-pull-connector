@@ -4,7 +4,7 @@ require 'rake'
 begin
   require 'jeweler'
   Jeweler::Tasks.new do |gem|
-    gem.name = "sonar-ews-pull-connector"
+    gem.name = "sonar_ews_pull_connector"
     gem.summary = %Q{Exchange Web Services connector for Exchange 2007/2010}
     gem.description = %Q{A sonar-connector for extracting emails from Exchange 2007/2010 through Exchange Web Services}
     gem.email = "craig@trampolinesystems.com"

@@ -5,6 +5,7 @@ require 'spec'
 require 'spec/autorun'
 require 'rr'
 require 'ews_pull_connector/ews_pull_connector'
+require 'sonar_connector/rspec/spec_helper'
 
 Spec::Runner.configure do |config|
   config.mock_with RR::Adapters::Rspec
