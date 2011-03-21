@@ -54,11 +54,26 @@ module Sonar
           offset = 0
 
           begin
-            query_opts = {
+            find_opts = {
               :sort_order=>[["item:DateTimeReceived", "Ascending"]],
               :indexed_page_item_view=>{
                 :max_entries_returned=>batch_size, 
                 :offset=>offset},
+              :item_shape=>{
+                :base_shape=>:IdOnly}}
+            
+            restriction = [:==, "item:ItemClass", "message"]
+            if fstate
+              restriction = [:and,
+                             restriction,
+                             [:>= , "item:DateTimeReceived", fstate]]
+            end
+            find_opts[:restriction] =  restriction
+            
+            msg_ids = fid.find_item(find_opts)
+
+
+            get_opts = {
               :item_shape=>{
                 :base_shape=>:IdOnly, 
                 :additional_properties=>[[:field_uri, "item:ItemClass"],
@@ -71,27 +86,18 @@ module Sonar
                                          [:field_uri, "message:Sender"],
                                          [:field_uri, "message:ToRecipients"],
                                          [:field_uri, "message:CcRecipients"],
-                                         [:field_uri, "message:BccRecipients"]]}
-            }
-            
-            restriction = [:==, "item:ItemClass", "message"]
-            if fstate
-              restriction = [:and,
-                             restriction,
-                             [:>= , "item:DateTimeReceived", fstate]]
-            end
-            query_opts[:restriction] =  restriction
-            
-            msgs = fid.find_item(query_opts)
+                                         [:field_uri, "message:BccRecipients"]]}}
+
+            msgs = fid.get_item(msg_ids, get_opts)
 
             save_messages(msgs)
             delete_messages(fid, msgs) if delete
 
-            offset += msgs.size
-          end while msgs.result.last["item:DateTimeReceived"].to_s == 
-            (fstate || msgs.result.first["item:DateTimeReceived"].to_s)
+            offset += msg_ids.size
+          end while msg_ids.result.last["item:DateTimeReceived"].to_s == 
+            (fstate || msg_ids.result.first["item:DateTimeReceived"].to_s)
 
-          state[fid.key] = msgs.result.last["item:DateTimeReceived"].to_s
+          state[fid.key] = msg_ids.result.last["item:DateTimeReceived"].to_s
           save_state
 
           log.info "finished processing: #{fid.inspect}"
@@ -100,7 +106,7 @@ module Sonar
       end
 
       def save_messages(messages)
-        messages.result.each do |msg|
+        messages.each do |msg|
           json_hash = {
             :type=>"email",
             :connector=>name,

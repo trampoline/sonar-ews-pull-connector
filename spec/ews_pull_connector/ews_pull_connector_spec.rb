@@ -84,10 +84,12 @@ module Sonar
           stub(c).state{state}
           
           c.distinguished_folder_ids.each do |fid|
+            msg_ids = Object.new
+            mock(msg_ids).size{1}
+            result = Object.new
+            stub(msg_ids).result{result}
+
             msgs = Object.new
-            mock(msgs).size{1}
-            result=Object.new
-            stub(msgs).result{result}
 
             earlier = DateTime.now-1
             later = DateTime.now
@@ -97,7 +99,9 @@ module Sonar
             # called once to check loop and once to update state
             mock(result).last.times(2).mock!.[]("item:DateTimeReceived").times(2){ later }
 
-            mock(fid).find_item(anything){msgs}
+            mock(fid).find_item(anything){msg_ids}
+            mock(fid).get_item(msg_ids, anything){msgs}
+            
             mock(c).save_messages(msgs)
             mock(c).delete_messages(fid, msgs)
           end
@@ -107,24 +111,28 @@ module Sonar
         it "should have a single item:ItemClass Restriction clause if fstate is nil" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
           fid = c.distinguished_folder_ids.first
-          msgs = Object.new
-          mock(msgs).size{1}
+
+          msg_ids = Object.new
+          mock(msg_ids).size{1}
           mock(fid).find_item(anything) do |query_opts|
             r = query_opts[:restriction]
             r.should == [:==, "item:ItemClass", "message"] 
-            msgs
+            msg_ids
           end
+
+          msgs=Object.new
+          mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
+          mock(c).delete_messages(fid, msgs)
 
           earlier=DateTime.now-1
           later=DateTime.now
 
           result=Object.new
-          stub(msgs).result{result}
+          stub(msg_ids).result{result}
           # state is empty, so timestamp from first message is used
           mock(result).first.mock!.[]("item:DateTimeReceived"){ earlier }
           mock(result).last.times(2).mock!.[]("item:DateTimeReceived").times(2){later}
-          mock(c).delete_messages(fid, msgs)
 
           c.action
         end
@@ -138,18 +146,21 @@ module Sonar
           state = {fid.key => state_time}
           stub(c).state{state}
 
-          msgs = Object.new
-          mock(msgs).size{1}
+          msg_ids = Object.new
+          mock(msg_ids).size{1}
           mock(fid).find_item(anything) do |query_opts|
             r = query_opts[:restriction]
             r[0].should == :and
               r[1].should == [:==, "item:ItemClass", "message"] 
             r[2].should == [:>=, "item:DateTimeReceived", state_time.to_s]
-            msgs
+            msg_ids
           end
+
+          msgs = Object.new
+          mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
           later_time = DateTime.now.to_s
-          mock(msgs).result.times(2).mock!.last.times(2).mock!.[]("item:DateTimeReceived").times(2){later_time}
+          mock(msg_ids).result.times(2).mock!.last.times(2).mock!.[]("item:DateTimeReceived").times(2){later_time}
           mock(c).delete_messages(fid, msgs)
 
           c.action
@@ -165,31 +176,35 @@ module Sonar
           state = {fid.key => state_time}
           stub(c).state{state}
 
+          msg_ids = Object.new
+          mock(msg_ids).size{10}
           msgs = Object.new
-          mock(msgs).size{10}
 
+          more_msg_ids = Object.new
+          mock(more_msg_ids).size{1}
           more_msgs = Object.new
-          mock(more_msgs).size{1}
 
           mock(fid).find_item.with_any_args.twice do |opts| 
             if opts[:indexed_page_item_view][:offset]==0
-              msgs
+              msg_ids
             elsif opts[:indexed_page_item_view][:offset]==10
-              more_msgs
+              more_msg_ids
             else
               raise "oops"
             end
           end
 
+          mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
           mock(c).delete_messages(fid, msgs)
-          mock(msgs).result.mock!.last.mock!.[]("item:DateTimeReceived"){state_time}
+          mock(msg_ids).result.mock!.last.mock!.[]("item:DateTimeReceived"){state_time}
 
           later_time = DateTime.now
+          mock(fid).get_item(more_msg_ids, anything){more_msgs}
           mock(c).save_messages(more_msgs)
           mock(c).delete_messages(fid, more_msgs)
-          mock(more_msgs).result.mock!.last.mock!.[]("item:DateTimeReceived"){later_time}
-          mock(more_msgs).result.mock!.last.mock!.[]("item:DateTimeReceived"){later_time}
+          mock(more_msg_ids).result.mock!.last.mock!.[]("item:DateTimeReceived"){later_time}
+          mock(more_msg_ids).result.mock!.last.mock!.[]("item:DateTimeReceived"){later_time}
 
           c.action
         end
@@ -225,8 +240,7 @@ module Sonar
           msg2 = {
             :item_id=>{:id=>"ghi", :change_key=>"jkl"}}
 
-          find_result = Object.new
-          mock(find_result).result{[msg1, msg2]}
+          msgs = [msg1, msg2]
 
           mock(c.filestore).write(:complete, "abc.json", anything) do |*args|
             check_saved_msg(c, msg1, args.last)
@@ -235,7 +249,7 @@ module Sonar
             check_saved_msg(c, msg2, args.last)
           end
 
-          c.save_messages(find_result)
+          c.save_messages(msgs)
         end
       end
 
