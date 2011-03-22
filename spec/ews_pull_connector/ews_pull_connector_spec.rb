@@ -85,7 +85,7 @@ module Sonar
           
           c.distinguished_folder_ids.each do |fid|
             msg_ids = Object.new
-            mock(msg_ids).size{1}
+            stub(msg_ids).length{1}
             result = Object.new
             stub(msg_ids).result{result}
 
@@ -113,10 +113,10 @@ module Sonar
           fid = c.distinguished_folder_ids.first
 
           msg_ids = Object.new
-          mock(msg_ids).size{1}
+          stub(msg_ids).length{1}
           mock(fid).find_item(anything) do |query_opts|
             r = query_opts[:restriction]
-            r.should == [:==, "item:ItemClass", "message"] 
+            r.should == [:==, "item:ItemClass", "IPM.Note"] 
             msg_ids
           end
 
@@ -147,11 +147,11 @@ module Sonar
           stub(c).state{state}
 
           msg_ids = Object.new
-          mock(msg_ids).size{1}
+          stub(msg_ids).length{1}
           mock(fid).find_item(anything) do |query_opts|
             r = query_opts[:restriction]
             r[0].should == :and
-              r[1].should == [:==, "item:ItemClass", "message"] 
+              r[1].should == [:==, "item:ItemClass", "IPM.Note"] 
             r[2].should == [:>=, "item:DateTimeReceived", state_time.to_s]
             msg_ids
           end
@@ -177,11 +177,11 @@ module Sonar
           stub(c).state{state}
 
           msg_ids = Object.new
-          mock(msg_ids).size{10}
+          stub(msg_ids).length{10}
           msgs = Object.new
 
           more_msg_ids = Object.new
-          mock(more_msg_ids).size{1}
+          stub(more_msg_ids).length{1}
           more_msgs = Object.new
 
           mock(fid).find_item.with_any_args.twice do |opts| 
@@ -208,6 +208,29 @@ module Sonar
 
           c.action
         end
+
+        it "should terminate the fetch loop if no messages are returned" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          
+          fid = c.distinguished_folder_ids.first
+
+          state_time = (DateTime.now - 1).to_s
+          state = {fid.key => state_time}
+          stub(c).state{state}
+
+          msg_ids = Object.new
+          stub(msg_ids).length{0}
+          msgs = Object.new
+
+          mock(fid).find_item.with_any_args do |opts| 
+            opts[:indexed_page_item_view][:offset].should == 0
+            msg_ids
+          end
+
+          c.action
+        end
+
+
       end
 
       describe "save_messages" do

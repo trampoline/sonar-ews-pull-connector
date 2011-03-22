@@ -62,7 +62,7 @@ module Sonar
               :item_shape=>{
                 :base_shape=>:IdOnly}}
             
-            restriction = [:==, "item:ItemClass", "message"]
+            restriction = [:==, "item:ItemClass", "IPM.Note"]
             if fstate
               restriction = [:and,
                              restriction,
@@ -72,32 +72,34 @@ module Sonar
             
             msg_ids = fid.find_item(find_opts)
 
+            if msg_ids && msg_ids.length>0
+              get_opts = {
+                :item_shape=>{
+                  :base_shape=>:IdOnly, 
+                  :additional_properties=>[[:field_uri, "item:ItemClass"],
+                                           [:field_uri, "item:DateTimeSent"],
+                                           [:field_uri, "item:DateTimeReceived"],
+                                           [:field_uri, "item:InReplyTo"],
+                                           [:field_uri, "message:InternetMessageId"],
+                                           [:field_uri, "message:References"],
+                                           [:field_uri, "message:From"],
+                                           [:field_uri, "message:Sender"],
+                                           [:field_uri, "message:ToRecipients"],
+                                           [:field_uri, "message:CcRecipients"],
+                                           [:field_uri, "message:BccRecipients"]]}}
+              
+              msgs = fid.get_item(msg_ids, get_opts)
+              
+              save_messages(msgs)
+              delete_messages(fid, msgs) if delete
 
-            get_opts = {
-              :item_shape=>{
-                :base_shape=>:IdOnly, 
-                :additional_properties=>[[:field_uri, "item:ItemClass"],
-                                         [:field_uri, "item:DateTimeSent"],
-                                         [:field_uri, "item:DateTimeReceived"],
-                                         [:field_uri, "item:InReplyTo"],
-                                         [:field_uri, "message:InternetMessageId"],
-                                         [:field_uri, "message:References"],
-                                         [:field_uri, "message:From"],
-                                         [:field_uri, "message:Sender"],
-                                         [:field_uri, "message:ToRecipients"],
-                                         [:field_uri, "message:CcRecipients"],
-                                         [:field_uri, "message:BccRecipients"]]}}
-
-            msgs = fid.get_item(msg_ids, get_opts)
-
-            save_messages(msgs)
-            delete_messages(fid, msgs) if delete
-
-            offset += msg_ids.size
-          end while msg_ids.result.last["item:DateTimeReceived"].to_s == 
+              offset += msg_ids.length
+            end
+          end while msg_ids.length>0 &&
+            msg_ids.result.last["item:DateTimeReceived"].to_s == 
             (fstate || msg_ids.result.first["item:DateTimeReceived"].to_s)
 
-          state[fid.key] = msg_ids.result.last["item:DateTimeReceived"].to_s
+          state[fid.key] = msg_ids.result.last["item:DateTimeReceived"].to_s if msg_ids.length>0
           save_state
 
           log.info "finished processing: #{fid.inspect}"
