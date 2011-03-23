@@ -77,6 +77,117 @@ module Sonar
         end
       end
 
+      describe "find" do
+        it "should include batch_size and offset but not item:DateTimeReceived restriction if there is no folder state" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          state={}
+          stub(c.state){state}
+          stub(c).batch_size{17}
+
+          folder_id = Object.new
+          folder_key = Object.new
+          stub(folder_id).key{folder_key}
+
+          mock(folder_id).find_item.with_any_args do |find_opts|
+            find_opts.should == {
+              :sort_order=>[["item:DateTimeReceived", "Ascending"]],
+              :indexed_page_item_view=>{
+                :max_entries_returned=>17, 
+                :offset=>123},
+              :item_shape=>{
+                :base_shape=>:IdOnly},
+              :restriction=>[:==, "item:ItemClass", "IPM.Note"]}
+          end
+
+          c.find(folder_id, 123)
+        end
+
+        it "should include a item:DateTimeReceived restriction if there is folder state" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          stub(c).batch_size{17}
+
+          folder_id = Object.new
+          folder_key = Object.new
+          stub(folder_id).key{folder_key}
+
+          state_time = DateTime.now.to_s
+          stub(c).state.stub!.[](folder_key){state_time}
+
+          mock(folder_id).find_item.with_any_args do |find_opts|
+            find_opts.should == {
+              :sort_order=>[["item:DateTimeReceived", "Ascending"]],
+              :indexed_page_item_view=>{
+                :max_entries_returned=>17, 
+                :offset=>123},
+              :item_shape=>{
+                :base_shape=>:IdOnly},
+              :restriction=>[:and,
+                             [:==, "item:ItemClass", "IPM.Note"],
+                             [:>=, "item:DateTimeReceived", state_time]]}
+          end
+
+          c.find(folder_id, 123)
+        end
+      end
+
+      describe "get" do
+        it "should not fetch message content if !is_journal" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+
+          folder_id = Object.new
+          msg_ids = Object.new
+
+          mock(folder_id).get_item.with_any_args do |mids, get_opts|
+            mids.should be(msg_ids)
+            get_opts.should == {
+              :item_shape=>{
+                :base_shape=>:IdOnly, 
+                :additional_properties=>[[:field_uri, "item:ItemClass"],
+                                         [:field_uri, "item:DateTimeSent"],
+                                         [:field_uri, "item:DateTimeReceived"],
+                                         [:field_uri, "item:InReplyTo"],
+                                         [:field_uri, "message:InternetMessageId"],
+                                         [:field_uri, "message:References"],
+                                         [:field_uri, "message:From"],
+                                         [:field_uri, "message:Sender"],
+                                         [:field_uri, "message:ToRecipients"],
+                                         [:field_uri, "message:CcRecipients"],
+                                         [:field_uri, "message:BccRecipients"]]}}
+          end
+
+          c.get(folder_id, msg_ids)
+        end
+
+        it "should fetch message content if is_journal" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          stub(c).is_journal{true}
+
+          folder_id = Object.new
+          msg_ids = Object.new
+
+          mock(folder_id).get_item.with_any_args do |mids, get_opts|
+            mids.should be(msg_ids)
+            get_opts.should == {
+              :item_shape=>{
+                :base_shape=>:IdOnly, 
+                :additional_properties=>[[:field_uri, "item:ItemClass"],
+                                         [:field_uri, "item:DateTimeSent"],
+                                         [:field_uri, "item:DateTimeReceived"],
+                                         [:field_uri, "item:InReplyTo"],
+                                         [:field_uri, "message:InternetMessageId"],
+                                         [:field_uri, "message:References"],
+                                         [:field_uri, "message:From"],
+                                         [:field_uri, "message:Sender"],
+                                         [:field_uri, "message:ToRecipients"],
+                                         [:field_uri, "message:CcRecipients"],
+                                         [:field_uri, "message:BccRecipients"],
+                                         [:field_uri, "item:MimeContent"]]}}
+          end
+
+          c.get(folder_id, msg_ids)
+        end
+      end
+
       describe "action" do
         it "should make a Rews find_item request, save, update state, delete" do
           c=Sonar::Connector::EwsPullConnector.new(two_folder_config, @base_config)
@@ -86,18 +197,10 @@ module Sonar
           c.distinguished_folder_ids.each do |fid|
             msg_ids = Object.new
             stub(msg_ids).length{1}
-            result = Object.new
-            stub(msg_ids).result{result}
 
             msgs = Object.new
-
-            earlier = DateTime.now-1
-            later = DateTime.now
-
-            # state is empty, so timestamp from first message is used
-            mock(result).first.mock!.[]("item:DateTimeReceived"){ earlier }
-            # called once to check loop and once to update state
-            mock(result).last.times(2).mock!.[]("item:DateTimeReceived").times(2){ later }
+            stub(msgs).first.stub!.[](:date_time_received){ DateTime.now-1 }
+            stub(msgs).last.stub!.[](:date_time_received){ DateTime.now }
 
             mock(fid).find_item(anything){msg_ids}
             mock(fid).get_item(msg_ids, anything){msgs}
@@ -121,18 +224,12 @@ module Sonar
           end
 
           msgs=Object.new
+          stub(msgs).first.stub!.[](:date_time_received){ DateTime.now-1 }
+          stub(msgs).last.stub!.[](:date_time_received){DateTime.now}
+
           mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
           mock(c).delete_messages(fid, msgs)
-
-          earlier=DateTime.now-1
-          later=DateTime.now
-
-          result=Object.new
-          stub(msg_ids).result{result}
-          # state is empty, so timestamp from first message is used
-          mock(result).first.mock!.[]("item:DateTimeReceived"){ earlier }
-          mock(result).last.times(2).mock!.[]("item:DateTimeReceived").times(2){later}
 
           c.action
         end
@@ -142,8 +239,8 @@ module Sonar
 
           fid = c.distinguished_folder_ids.first
 
-          state_time = (DateTime.now - 1).to_s
-          state = {fid.key => state_time}
+          state_time = DateTime.now - 1
+          state = {fid.key => state_time.to_s}
           stub(c).state{state}
 
           msg_ids = Object.new
@@ -157,10 +254,11 @@ module Sonar
           end
 
           msgs = Object.new
+          stub(msgs).first.stub!.[](:date_time_received){state_time}
+          stub(msgs).last.stub!.[](:date_time_received){DateTime.now}
+
           mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
-          later_time = DateTime.now.to_s
-          mock(msg_ids).result.times(2).mock!.last.times(2).mock!.[]("item:DateTimeReceived").times(2){later_time}
           mock(c).delete_messages(fid, msgs)
 
           c.action
@@ -171,18 +269,21 @@ module Sonar
           
           fid = c.distinguished_folder_ids.first
 
-          state_time = (DateTime.now - 1).to_s
-          later_time = DateTime.now.to_s
+          state_time = (DateTime.now - 2).to_s
           state = {fid.key => state_time}
           stub(c).state{state}
 
           msg_ids = Object.new
           stub(msg_ids).length{10}
           msgs = Object.new
+          stub(msgs).first.stub!.[](:date_time_received){state_time}
+          stub(msgs).last.stub!.[](:date_time_received){state_time}
 
           more_msg_ids = Object.new
           stub(more_msg_ids).length{1}
           more_msgs = Object.new
+          stub(more_msgs).first.stub!.[](:date_time_received){state_time}
+          stub(more_msgs).last.stub!.[](:date_time_received){DateTime.now}
 
           mock(fid).find_item.with_any_args.twice do |opts| 
             if opts[:indexed_page_item_view][:offset]==0
@@ -197,14 +298,10 @@ module Sonar
           mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
           mock(c).delete_messages(fid, msgs)
-          mock(msg_ids).result.mock!.last.mock!.[]("item:DateTimeReceived"){state_time}
 
-          later_time = DateTime.now
           mock(fid).get_item(more_msg_ids, anything){more_msgs}
           mock(c).save_messages(more_msgs)
           mock(c).delete_messages(fid, more_msgs)
-          mock(more_msg_ids).result.mock!.last.mock!.[]("item:DateTimeReceived"){later_time}
-          mock(more_msg_ids).result.mock!.last.mock!.[]("item:DateTimeReceived"){later_time}
 
           c.action
         end
