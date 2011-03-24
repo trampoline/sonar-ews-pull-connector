@@ -1,7 +1,7 @@
 require 'date'
 require 'json'
 require 'sonar_connector'
-require 'exjournal'
+require 'rfc822_util'
 require 'rews'
 
 module Sonar
@@ -147,25 +147,42 @@ module Sonar
         end
       end
 
+      def mailbox_to_hash(mailbox)
+        [:name, :email_address].inject({}) do |h, k|
+          h[k] = mailbox[k]
+          h
+        end
+      end
+
+      def mailbox_recipients_to_hashes(recipients)
+        mailboxes = recipients[:mailbox] if recipients
+        mailboxes = [mailboxes] if !mailboxes.is_a?(Array)
+        mailboxes.compact.map{|a| mailbox_to_hash(a)}
+      end
+
       def message_to_hash(msg)
+        message_id = Rfc822Util.strip_header(msg[:internet_message_id]) if msg[:internet_message_id]
+        in_reply_to = Rfc822Util.strip_headers(msg[:in_reply_to]).first if msg[:in_reply_to]
+        references = Rfc822Util.strip_headers(msg[:references]) if msg[:references]
+        
           json_hash = {
-            :message_id=>msg[:internet_message_id],
-            :sent_at=>msg[:date_time_sent],
-            :in_reply_to=>msg[:in_reply_to],
-            :references=>msg[:references],
-            :from=>msg[:from],
-            :sender=>msg[:sender],
-            :to=>msg[:to_recipients],
-            :cc=>msg[:cc_recipients],
-            :bcc=>msg[:bcc_recipients]
+            :message_id=>message_id,
+            :sent_at=>msg[:date_time_sent].to_s,
+            :in_reply_to=>in_reply_to,
+            :references=>references,
+            :from=>mailbox_recipients_to_hashes(msg[:from]).first,
+            :sender=>mailbox_recipients_to_hashes(msg[:sender]).first,
+            :to=>mailbox_recipients_to_hashes(msg[:to_recipients]),
+            :cc=>mailbox_recipients_to_hashes(msg[:cc_recipients]),
+            :bcc=>mailbox_recipients_to_hashes(msg[:bcc_recipients])
           }
           
       end
 
       def extract_journalled_message(message)
         mime_msg = message[:mime_content]
-        journal_msg = Exjournal.extract_journalled_mail(mime_msg)
-        Exjournal.mail_to_hash(journal_msg)
+        journal_msg = Rfc822Util.extract_journalled_mail(mime_msg)
+        Rfc822Util.mail_to_hash(journal_msg)
       end
 
       def delete_messages(folder_id, messages)

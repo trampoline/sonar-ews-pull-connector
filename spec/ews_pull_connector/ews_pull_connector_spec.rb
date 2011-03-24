@@ -330,6 +330,69 @@ module Sonar
 
       end
 
+      describe "mailbox_to_hash" do
+        it "should keep only :name and :email_address keys of a Rews address hash" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          mb = {:name=>"foo bar", :email_address=>"foo@bar.com", :blah=>"blah"}
+          c.mailbox_to_hash(mb).should == {:name=>"foo bar", :email_address=>"foo@bar.com"}
+        end
+      end
+
+      describe "mailbox_recipients_to_hashes" do
+        it "should convert a nil recipient to an empty list" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          mbr = {:mailbox=>nil}
+          c.mailbox_recipients_to_hashes(mbr).should == []
+        end
+
+        it "should convert a single recipient to a list of one hash" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          mbr = {:mailbox=>{:name=>"foo bar", :email_address=>"foo@bar.com", :blah=>"blah"}}
+          c.mailbox_recipients_to_hashes(mbr).should == [{:name=>"foo bar", :email_address=>"foo@bar.com"}]
+        end
+
+        it "should convert multiple recipients to a list of hashes" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          mbr = {:mailbox=>[{:name=>"foo bar", :email_address=>"foo@bar.com", :blah=>"blah"},
+                            {:name=>"baz mcbaz", :email_address=>"baz.mcbaz@baz.com"}]}
+          c.mailbox_recipients_to_hashes(mbr).should == [{:name=>"foo bar", :email_address=>"foo@bar.com"},
+                                                         {:name=>"baz mcbaz", :email_address=>"baz.mcbaz@baz.com"}]
+        end
+      end
+
+      describe "message_to_hash" do
+        it "should convert a message Rews::Item::Item to a hash" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          sent_at = DateTime.now-1
+          m = Rews::Item::Item.new(c, 
+                                   :message, 
+                                   :item_id=>{:id=>"abc", :change_key=>"def"},
+                                   :internet_message_id=>"<abc123>",
+                                   :date_time_sent=>sent_at,
+                                   :date_time_received=>DateTime.now,
+                                   :in_reply_to=>"<foo>",
+                                   :references=>["<foo>", "<bar>"],
+                                   :from=>{:mailbox=>{:name=>"foo mcfoo", :email_address=>"foo.mcfoo@foo.com"}},
+                                   :sender=>{:mailbox=>{:name=>"mrs mcmrs", :email_address=>"mrs.mcmrs@foo.com"}},
+                                   :to_recipients=>{:mailbox=>[{:name=>"bar mcbar", :email_address=>"bar.mcbar@bar.com"}, {:name=>"baz mcbaz", :email_address=>"baz.mcbaz@baz.com"}]},
+                                   :cc_recipients=>{:mailbox=>{:name=>"woo wuwoo", :email_address=>"woo.wuwoo@woo.com"}},
+                                   :bcc_recipients=>{:mailbox=>{:name=>"fee mcfee", :email_address=>"fee.mcfee@fee.com"}})
+          h=c.message_to_hash(m)
+          h.should == {
+            :message_id=>"abc123",
+            :sent_at=>sent_at.to_s,
+            :in_reply_to=>"foo",
+            :references=>["foo", "bar"],
+            :from=>{:name=>"foo mcfoo", :email_address=>"foo.mcfoo@foo.com"},
+            :sender=>{:name=>"mrs mcmrs", :email_address=>"mrs.mcmrs@foo.com"},
+            :to=>[{:name=>"bar mcbar", :email_address=>"bar.mcbar@bar.com"},
+                             {:name=>"baz mcbaz", :email_address=>"baz.mcbaz@baz.com"}],
+            :cc=>[{:name=>"woo wuwoo", :email_address=>"woo.wuwoo@woo.com"}],
+            :bcc=>[{:name=>"fee mcfee", :email_address=>"fee.mcfee@fee.com"}]
+          }
+        end
+      end
+
       describe "save_messages" do
         def check_saved_msg(c, msg, json_msg)
             h = JSON.parse(json_msg)
