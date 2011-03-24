@@ -399,7 +399,7 @@ module Sonar
             h["type"].should == "email"
             h["connector"].should == c.name
             h["source"].should == c.url
-            h["source_id"].should == JSON.parse(msg[:item_id].to_json)
+            h["source_id"].should == msg[:item_id][:id]
           
         end
 
@@ -425,10 +425,10 @@ module Sonar
 
           msgs = [msg1, msg2]
 
-          mock(c.filestore).write(:complete, "abc.json", anything) do |*args|
+          mock(c.filestore).write(:complete, "#{MD5.hexdigest('abc')}.json", anything) do |*args|
             check_saved_msg(c, msg1, args.last)
           end
-          mock(c.filestore).write(:complete, "ghi.json", anything) do |*args|
+          mock(c.filestore).write(:complete, "#{MD5.hexdigest('ghi')}.json", anything) do |*args|
             check_saved_msg(c, msg2, args.last)
           end
 

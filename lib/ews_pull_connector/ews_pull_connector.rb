@@ -2,6 +2,8 @@ require 'date'
 require 'json'
 require 'sonar_connector'
 require 'rfc822_util'
+require 'base64'
+require 'md5'
 require 'rews'
 
 module Sonar
@@ -11,14 +13,14 @@ module Sonar
       MIN_BATCH_SIZE = 2
       DEFAULT_BATCH_SIZE = 100
 
-      attr_reader :url
-      attr_reader :auth
-      attr_reader :user
-      attr_reader :password
-      attr_reader :distinguished_folders
-      attr_reader :batch_size
-      attr_reader :delete
-      attr_reader :is_journal
+      attr_accessor :url
+      attr_accessor :auth
+      attr_accessor :user
+      attr_accessor :password
+      attr_accessor :distinguished_folders
+      attr_accessor :batch_size
+      attr_accessor :delete
+      attr_accessor :is_journal
 
       def parse(settings)
         ["name", "repeat_delay", "url", "auth", "user", "password", "distinguished_folders", "batch_size"].each do |param|
@@ -37,7 +39,7 @@ module Sonar
       end
       
       def inspect
-        "#<#{self.class} @url=#{url}, @auth=#{auth}, @user=#{user}, @password=#{password}, @distinguished_folders=#{distinguished_folders}, @batch_size=#{batch_size}>"
+        "#<#{self.class} @url=#{url}, @auth=#{auth}, @user=#{user}, @password=#{password}, @distinguished_folders=#{distinguished_folders}, @batch_size=#{batch_size}, @delete=#{delete}, @is_journal=#{is_journal}>"
       end
 
       def distinguished_folder_ids
@@ -109,11 +111,11 @@ module Sonar
               msgs = get(fid, msg_ids)
 
               # if there is no state, then state is set to the first message timestamp
-              state[fid.key] ||= msgs.first[:date_time_received] if msgs.first[:date_time_received]
+              state[fid.key] ||= msgs.first[:date_time_received].to_s if msgs.first[:date_time_received]
 
-              if msgs.last[:date_time_received] > state[fid.key]
+              if msgs.last[:date_time_received] != state[fid.key]
                 finished=true
-                state[fid.key] = msgs.last[:date_time_received]
+                state[fid.key] = msgs.last[:date_time_received].to_s
               end
               
               save_messages(msgs)
@@ -140,10 +142,12 @@ module Sonar
           h[:type] = "email"
           h[:connector] = name
           h[:source] = url
-          h[:source_id]=msg[:item_id]
+          h[:source_id]=msg[:item_id][:id]
           h[:received_at] = msg[:date_time_received]
 
-          filestore.write(:complete, "#{msg[:item_id][:id]}.json", h.to_json)
+
+          fname = MD5.hexdigest(msg[:item_id][:id])
+          filestore.write(:complete, "#{fname}.json", h.to_json)
         end
       end
 
@@ -180,7 +184,7 @@ module Sonar
       end
 
       def extract_journalled_message(message)
-        mime_msg = message[:mime_content]
+        mime_msg = Base64::decode64(message[:mime_content])
         journal_msg = Rfc822Util.extract_journalled_mail(mime_msg)
         Rfc822Util.mail_to_hash(journal_msg)
       end
