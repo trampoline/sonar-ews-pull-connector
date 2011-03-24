@@ -113,12 +113,13 @@ module Sonar
               # if there is no state, then state is set to the first message timestamp
               state[fid.key] ||= msgs.first[:date_time_received].to_s if msgs.first[:date_time_received]
 
+              save_messages(msgs)
+
               if msgs.last[:date_time_received] != state[fid.key]
                 finished=true
                 state[fid.key] = msgs.last[:date_time_received].to_s
               end
               
-              save_messages(msgs)
               delete_messages(fid, msgs) if delete
 
               offset += msg_ids.length
@@ -187,6 +188,9 @@ module Sonar
         mime_msg = Base64::decode64(message[:mime_content])
         journal_msg = Rfc822Util.extract_journalled_mail(mime_msg)
         Rfc822Util.mail_to_hash(journal_msg)
+      rescue Exception=>e
+        log.warn("problem extracting journalled message from wrapper message")
+        log.warn(e)
       end
 
       def delete_messages(folder_id, messages)

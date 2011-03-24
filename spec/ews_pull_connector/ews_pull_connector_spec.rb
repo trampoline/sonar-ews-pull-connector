@@ -436,6 +436,27 @@ module Sonar
         end
       end
 
+      describe "extract_journalled_message" do
+        it "should catch any exception extracting the message, log a warning and return nil" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+
+          msg = Object.new
+          mime_content = Object.new
+          stub(msg).[](:mime_content){mime_content}
+          mime_msg = Object.new
+          stub(Base64).decode64(mime_content){mime_msg}
+          e = begin ; raise "bang" ; rescue Exception=>e ; e ; end
+          stub(Rfc822Util).extract_journalled_mail(mime_msg){raise e}
+
+          stub(c.log).warn(/problem/)
+          stub(c.log).warn(e)
+          
+          lambda{
+            c.extract_journalled_message(msg)
+          }.should_not raise_error
+        end
+      end
+
       describe "delete_messages" do
         it "should HardDelete all messages from a result" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
