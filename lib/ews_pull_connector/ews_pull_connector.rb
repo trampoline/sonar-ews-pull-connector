@@ -135,11 +135,17 @@ module Sonar
 
       def save_messages(messages)
         messages.each do |msg|
-          if is_journal
-            h = extract_journalled_message(msg)
-          else
-            h = message_to_hash(msg)
+          h = if is_journal
+                extract_journalled_message(msg)
+              else
+                message_to_hash(msg)
+              end
+          
+          if !h
+            log.warn("no data extracted from message. could be a decoding eror")
+            return
           end
+
           h[:type] = "email"
           h[:connector] = name
           h[:source] = url

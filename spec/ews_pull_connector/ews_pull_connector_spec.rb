@@ -434,6 +434,20 @@ module Sonar
 
           c.save_messages(msgs)
         end
+
+        it "should log and continue if the extracted message is nil" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          stub(c).is_journal{true}
+
+          msg = Object.new
+          msgs=[msg]
+          stub(c).extract_journalled_message(msg){nil}
+          
+          stub(c.log).warn(/no data extracted/)
+          dont_allow(c.filestore).write
+
+          c.save_messages(msgs)
+        end
       end
 
       describe "extract_journalled_message" do
