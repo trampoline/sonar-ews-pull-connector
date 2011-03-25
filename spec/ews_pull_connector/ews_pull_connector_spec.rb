@@ -462,11 +462,10 @@ module Sonar
           e = begin ; raise "bang" ; rescue Exception=>e ; e ; end
           stub(Rfc822Util).extract_journalled_mail(mime_msg){raise e}
 
-          stub(c.log).warn(/problem/)
-          stub(c.log).warn(e)
+          stub(c.log).warn(anything){true}
           
           lambda{
-            c.extract_journalled_message(msg)
+            c.extract_journalled_message(msg).should == nil
           }.should_not raise_error
         end
       end

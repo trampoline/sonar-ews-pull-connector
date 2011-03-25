@@ -197,6 +197,7 @@ module Sonar
       rescue Exception=>e
         log.warn("problem extracting journalled message from wrapper message")
         log.warn(e)
+        nil
       end
 
       def delete_messages(folder_id, messages)
