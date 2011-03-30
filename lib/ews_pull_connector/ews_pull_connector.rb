@@ -51,7 +51,8 @@ module Sonar
         end
       end
 
-      # find message ids from a folder
+      # find message ids from a folder, including item:DateTimeReceived, ordered
+      # by ascending item:DateTimeReceived
       def find(folder_id, offset)
         find_opts = {
           :sort_order=>[["item:DateTimeReceived", "Ascending"]],
@@ -59,7 +60,8 @@ module Sonar
             :max_entries_returned=>batch_size, 
             :offset=>offset},
           :item_shape=>{
-            :base_shape=>:IdOnly}}
+            :base_shape=>:IdOnly,
+            :additional_properties=>[[:field_uri, "item:DateTimeReceived"]]}}
         
         restriction = [:==, "item:ItemClass", "IPM.Note"]
         if state[folder_id.key]
@@ -108,19 +110,24 @@ module Sonar
             msg_ids = find(fid, offset)
 
             if msg_ids && msg_ids.length>0
-              msgs = get(fid, msg_ids)
-
               # if there is no state, then state is set to the first message timestamp
-              state[fid.key] ||= msgs.first[:date_time_received].to_s if msgs.first[:date_time_received]
+              state[fid.key] ||= msg_ids.first[:date_time_received].to_s if msg_ids.first[:date_time_received]
 
-              save_messages(msgs)
+              begin
+                msgs = get(fid, msg_ids)
+                save_messages(msgs)
+              rescue Exception=>e
+                log.warn("problem retrieving messages: #{msg_ids.inspect}")
+                log.warn(e)
+                log.warn("messages WILL be deleted") if delete
+              end
 
-              if msgs.last[:date_time_received] != state[fid.key]
+              if delete || msg_ids.last[:date_time_received] != state[fid.key]
                 finished=true
-                state[fid.key] = msgs.last[:date_time_received].to_s
+                state[fid.key] = msg_ids.last[:date_time_received].to_s
               end
               
-              delete_messages(fid, msgs) if delete
+              delete_messages(fid, msg_ids) if delete
 
               offset += msg_ids.length
             end
@@ -146,12 +153,10 @@ module Sonar
             return
           end
 
-          h[:type] = "email"
           h[:connector] = name
           h[:source] = url
           h[:source_id]=msg[:item_id][:id]
           h[:received_at] = msg[:date_time_received]
-
 
           fname = MD5.hexdigest(msg[:item_id][:id])
           filestore.write(:complete, "#{fname}.json", h.to_json)
@@ -176,17 +181,18 @@ module Sonar
         in_reply_to = Rfc822Util.strip_headers(msg[:in_reply_to]).first if msg[:in_reply_to]
         references = Rfc822Util.strip_headers(msg[:references]) if msg[:references]
         
-          json_hash = {
-            :message_id=>message_id,
-            :sent_at=>msg[:date_time_sent].to_s,
-            :in_reply_to=>in_reply_to,
-            :references=>references,
-            :from=>mailbox_recipients_to_hashes(msg[:from]).first,
-            :sender=>mailbox_recipients_to_hashes(msg[:sender]).first,
-            :to=>mailbox_recipients_to_hashes(msg[:to_recipients]),
-            :cc=>mailbox_recipients_to_hashes(msg[:cc_recipients]),
-            :bcc=>mailbox_recipients_to_hashes(msg[:bcc_recipients])
-          }
+        json_hash = {
+          :message_type=>"email",
+          :message_id=>message_id,
+          :sent_at=>msg[:date_time_sent].to_s,
+          :in_reply_to=>in_reply_to,
+          :references=>references,
+          :from=>mailbox_recipients_to_hashes(msg[:from]).first,
+          :sender=>mailbox_recipients_to_hashes(msg[:sender]).first,
+          :to=>mailbox_recipients_to_hashes(msg[:to_recipients]),
+          :cc=>mailbox_recipients_to_hashes(msg[:cc_recipients]),
+          :bcc=>mailbox_recipients_to_hashes(msg[:bcc_recipients])
+        }
           
       end
 

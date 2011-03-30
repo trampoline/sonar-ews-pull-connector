@@ -9,7 +9,7 @@ module Sonar
         @base_config = Sonar::Connector::Config.load(valid_config_filename)
       end
 
-      def one_folder_config
+      def one_folder_config(opts={})
         {
           'name'=>'foobarcom-exchange',
           'repeat_delay'=>60,
@@ -19,11 +19,11 @@ module Sonar
           'password'=>"foopass",
           'distinguished_folders'=>[["inbox", "foo@foo.com"]],
           'batch_size'=>100,
-          'delete'=>true
-        }
+          'delete'=>false
+        }.merge(opts)
       end
 
-      def two_folder_config
+      def two_folder_config(opts={})
         {
           'name'=>'foobarcom-exchange',
           'repeat_delay'=>60,
@@ -33,8 +33,8 @@ module Sonar
           'password'=>"foopass",
           'distinguished_folders'=>[["inbox", "foo@foo.com"], "inbox"],
           'batch_size'=>100,
-          'delete'=>true
-        } 
+          'delete'=>false
+        }.merge(opts)
       end
 
       it "should parse config" do
@@ -95,7 +95,8 @@ module Sonar
                 :max_entries_returned=>17, 
                 :offset=>123},
               :item_shape=>{
-                :base_shape=>:IdOnly},
+                :base_shape=>:IdOnly,
+                :additional_properties=>[[:field_uri, "item:DateTimeReceived"]]},
               :restriction=>[:==, "item:ItemClass", "IPM.Note"]}
           end
 
@@ -120,7 +121,8 @@ module Sonar
                 :max_entries_returned=>17, 
                 :offset=>123},
               :item_shape=>{
-                :base_shape=>:IdOnly},
+                :base_shape=>:IdOnly,
+                :additional_properties=>[[:field_uri, "item:DateTimeReceived"]]},
               :restriction=>[:and,
                              [:==, "item:ItemClass", "IPM.Note"],
                              [:>=, "item:DateTimeReceived", state_time]]}
@@ -190,7 +192,7 @@ module Sonar
 
       describe "action" do
         it "should make a Rews find_item request, save, update state, delete" do
-          c=Sonar::Connector::EwsPullConnector.new(two_folder_config, @base_config)
+          c=Sonar::Connector::EwsPullConnector.new(two_folder_config('delete'=>true), @base_config)
           state = {}
           stub(c).state{state}
           
@@ -198,17 +200,67 @@ module Sonar
             msg_ids = Object.new
             stub(msg_ids).length{1}
 
-            msgs = Object.new
-            stub(msgs).first.stub!.[](:date_time_received){ DateTime.now-1 }
-            stub(msgs).last.stub!.[](:date_time_received){ DateTime.now }
+            stub(msg_ids).first.stub!.[](:date_time_received){ DateTime.now-1 }
+            stub(msg_ids).last.stub!.[](:date_time_received){ DateTime.now }
 
             mock(fid).find_item(anything){msg_ids}
+
+            msgs = Object.new
             mock(fid).get_item(msg_ids, anything){msgs}
             
             mock(c).save_messages(msgs)
-            mock(c).delete_messages(fid, msgs)
+            mock(c).delete_messages(fid, msg_ids)
           end
           c.action
+        end
+
+        it "should catch exceptions during message fetch" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          fid = c.distinguished_folder_ids.first
+
+          msg_ids = Object.new
+          stub(msg_ids).length{10}
+          
+          earlier = DateTime.now - 1
+          stub(msg_ids).first.stub!.[](:date_time_received){ earlier }
+          later = DateTime.now
+          stub(msg_ids).last.stub!.[](:date_time_received){ later }
+          
+          mock(fid).find_item(anything){msg_ids}
+          
+          msgs = Object.new
+          mock(fid).get_item(msg_ids, anything){raise "boo"}
+          
+          dont_allow(c).save_messages(msgs)
+          
+          c.action
+
+          c.state[fid.key].should == later.to_s
+        end
+
+        it "should catch exceptions during fetch and delete if 'delete' option is true" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config('delete'=>true), @base_config)
+          fid = c.distinguished_folder_ids.first
+
+          msg_ids = Object.new
+          stub(msg_ids).length{10}
+          
+          earlier = DateTime.now - 1
+          stub(msg_ids).first.stub!.[](:date_time_received){ earlier }
+          later = DateTime.now
+          stub(msg_ids).last.stub!.[](:date_time_received){ later }
+          
+          mock(fid).find_item(anything){msg_ids}
+          
+          msgs = Object.new
+          mock(fid).get_item(msg_ids, anything){raise "boo"}
+          
+          dont_allow(c).save_messages(msgs)
+          mock(c).delete_messages(fid, msg_ids)
+          
+          c.action
+
+          c.state[fid.key].should == later.to_s
         end
 
         it "should have a single item:ItemClass Restriction clause if fstate is nil" do
@@ -223,13 +275,12 @@ module Sonar
             msg_ids
           end
 
-          msgs=Object.new
-          stub(msgs).first.stub!.[](:date_time_received){ DateTime.now-1 }
-          stub(msgs).last.stub!.[](:date_time_received){DateTime.now}
+          stub(msg_ids).first.stub!.[](:date_time_received){ DateTime.now-1 }
+          stub(msg_ids).last.stub!.[](:date_time_received){DateTime.now}
 
+          msgs=Object.new
           mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
-          mock(c).delete_messages(fid, msgs)
 
           c.action
         end
@@ -253,18 +304,44 @@ module Sonar
             msg_ids
           end
 
-          msgs = Object.new
-          stub(msgs).first.stub!.[](:date_time_received){state_time}
-          stub(msgs).last.stub!.[](:date_time_received){DateTime.now}
+          stub(msg_ids).first.stub!.[](:date_time_received){state_time}
+          stub(msg_ids).last.stub!.[](:date_time_received){DateTime.now}
 
+          msgs = Object.new
           mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
-          mock(c).delete_messages(fid, msgs)
 
           c.action
         end
 
-        it "should cycle through messages with identical item:DateTimeReceived, so state is always updated even if 'delete' option is false" do
+        it "should not cycle through messages with identical item:DateTimeRecieved if 'delete' option is true" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config('delete'=>true), @base_config)
+          
+          fid = c.distinguished_folder_ids.first
+
+          state_time = (DateTime.now - 2).to_s
+          state = {fid.key => state_time}
+          stub(c).state{state}
+
+          msg_ids = Object.new
+          stub(msg_ids).length{10}
+          stub(msg_ids).first.stub!.[](:date_time_received){state_time}
+          stub(msg_ids).last.stub!.[](:date_time_received){state_time}
+          msgs = Object.new
+
+          mock(fid).find_item.with_any_args do |opts| 
+            opts[:indexed_page_item_view][:offset].should == 0
+            msg_ids
+          end
+
+          mock(fid).get_item(msg_ids, anything){msgs}
+          mock(c).save_messages(msgs)
+          mock(c).delete_messages(fid, msg_ids)
+
+          c.action
+        end
+
+        it "should cycle through messages with identical item:DateTimeReceived, so state is always updated if 'delete' option is false" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
           
           fid = c.distinguished_folder_ids.first
@@ -275,15 +352,15 @@ module Sonar
 
           msg_ids = Object.new
           stub(msg_ids).length{10}
+          stub(msg_ids).first.stub!.[](:date_time_received){state_time}
+          stub(msg_ids).last.stub!.[](:date_time_received){state_time}
           msgs = Object.new
-          stub(msgs).first.stub!.[](:date_time_received){state_time}
-          stub(msgs).last.stub!.[](:date_time_received){state_time}
 
           more_msg_ids = Object.new
           stub(more_msg_ids).length{1}
+          stub(more_msg_ids).first.stub!.[](:date_time_received){state_time}
+          stub(more_msg_ids).last.stub!.[](:date_time_received){DateTime.now}
           more_msgs = Object.new
-          stub(more_msgs).first.stub!.[](:date_time_received){state_time}
-          stub(more_msgs).last.stub!.[](:date_time_received){DateTime.now}
 
           mock(fid).find_item.with_any_args.twice do |opts| 
             if opts[:indexed_page_item_view][:offset]==0
@@ -297,11 +374,9 @@ module Sonar
 
           mock(fid).get_item(msg_ids, anything){msgs}
           mock(c).save_messages(msgs)
-          mock(c).delete_messages(fid, msgs)
 
           mock(fid).get_item(more_msg_ids, anything){more_msgs}
           mock(c).save_messages(more_msgs)
-          mock(c).delete_messages(fid, more_msgs)
 
           c.action
         end
@@ -379,6 +454,7 @@ module Sonar
                                    :bcc_recipients=>{:mailbox=>{:name=>"fee mcfee", :email_address=>"fee.mcfee@fee.com"}})
           h=c.message_to_hash(m)
           h.should == {
+            :message_type=>"email",
             :message_id=>"abc123",
             :sent_at=>sent_at.to_s,
             :in_reply_to=>"foo",
@@ -396,11 +472,10 @@ module Sonar
       describe "save_messages" do
         def check_saved_msg(c, msg, json_msg)
             h = JSON.parse(json_msg)
-            h["type"].should == "email"
             h["connector"].should == c.name
             h["source"].should == c.url
             h["source_id"].should == msg[:item_id][:id]
-          
+            h["message_type"].should == "email"
         end
 
         it "should save a file for each message result" do
