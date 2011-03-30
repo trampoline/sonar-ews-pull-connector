@@ -120,6 +120,7 @@ module Sonar
                 log.warn("problem retrieving messages: #{msg_ids.inspect}")
                 log.warn(e)
                 log.warn("messages WILL be deleted") if delete
+                save_error(msg_ids, e.savon_response) if e.respond_to?(:savon_response)
               end
 
               if delete || msg_ids.last[:date_time_received] != state[fid.key]
@@ -161,6 +162,12 @@ module Sonar
           fname = MD5.hexdigest(msg[:item_id][:id])
           filestore.write(:complete, "#{fname}.json", h.to_json)
         end
+      end
+
+      def save_error(msg_ids, savon_response)
+        xml = savon_response.to_xml
+        fname = "error.xml"
+        filestore.write(:error, fname, xml)
       end
 
       def mailbox_to_hash(mailbox)

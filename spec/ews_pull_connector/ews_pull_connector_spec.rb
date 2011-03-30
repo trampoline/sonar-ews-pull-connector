@@ -214,7 +214,7 @@ module Sonar
           c.action
         end
 
-        it "should catch exceptions during message fetch" do
+        it "should catch exceptions during message fetch and write any xml to an error file" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
           fid = c.distinguished_folder_ids.first
 
@@ -228,10 +228,19 @@ module Sonar
           
           mock(fid).find_item(anything){msg_ids}
           
+          exception = RuntimeError.new("boo")
+          savon_response = Object.new
+          stub(savon_response).to_xml{"<tig><tag/></tig>"}
+          stub(exception).savon_response{savon_response}
+
           msgs = Object.new
-          mock(fid).get_item(msg_ids, anything){raise "boo"}
+          mock(fid).get_item(msg_ids, anything){raise exception}
+          mock(c.log).warn(/problem retrieving/)
+          mock(c.log).warn(is_a(RuntimeError))
           
           dont_allow(c).save_messages(msgs)
+
+          mock(c.filestore).write(:error, "error.xml", "<tig><tag/></tig>")
           
           c.action
 
@@ -254,6 +263,9 @@ module Sonar
           
           msgs = Object.new
           mock(fid).get_item(msg_ids, anything){raise "boo"}
+          mock(c.log).warn(/problem retrieving/)
+          mock(c.log).warn(is_a(RuntimeError))
+          mock(c.log).warn(/be deleted/)
           
           dont_allow(c).save_messages(msgs)
           mock(c).delete_messages(fid, msg_ids)
