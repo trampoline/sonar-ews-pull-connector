@@ -10,17 +10,14 @@ module Sonar
   module Connector
     class EwsPullConnector < Sonar::Connector::Base
 
-      MIN_BATCH_SIZE = 2
-      DEFAULT_BATCH_SIZE = 100
-
       attr_accessor :url
       attr_accessor :auth
       attr_accessor :user
       attr_accessor :password
       attr_accessor :distinguished_folders
-      attr_accessor :batch_size
       attr_accessor :delete
       attr_accessor :is_journal
+      attr_accessor :batch_size
 
       def parse(settings)
         ["name", "repeat_delay", "url", "auth", "user", "password", "distinguished_folders", "batch_size"].each do |param|
@@ -33,9 +30,13 @@ module Sonar
         @password = settings["password"]
         @mailbox_email = settings["mailbox_email"]
         @distinguished_folders = settings["distinguished_folders"]
-        @batch_size = [settings["batch_size"] || DEFAULT_BATCH_SIZE, MIN_BATCH_SIZE].max
         @delete = !!settings["delete"]
         @is_journal = !!settings["is_journal"]
+        @batch_size = settings["batch_size"]
+
+        raise "batch_size must be >= 1" if batch_size<1
+        raise "batch_size must be >= 2 if delete not true" if !delete && batch_size<2
+        raise "batch_size must be 1 if is_journal is true" if is_journal && batch_size>1
       end
       
       def inspect
