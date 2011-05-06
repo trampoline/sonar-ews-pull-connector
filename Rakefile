@@ -16,6 +16,8 @@ begin
     gem.add_dependency "httpclient", ">= 2.1.6.1.1"
     gem.add_dependency "fetch_in", ">= 0.2.0"
     gem.add_dependency "rfc822_util", ">= 0.1.1"
+    gem.add_dependency "rews", ">= 0.5.0"
+    gem.add_dependency "rsxml", ">= 0.1.4"
     gem.add_development_dependency "rspec", ">= 1.2.9"
     gem.add_development_dependency "rr", ">= 0.10.5"
     # gem is a Gem::Specification... see http://www.rubygems.org/read/chapter/20 for additional settings

@@ -136,38 +136,11 @@ module Sonar
         it "should not fetch message content if !is_journal" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
 
-          folder_id = Object.new
+          client = Object.new
+          stub(c).client{client}
           msg_ids = Object.new
 
-          mock(folder_id).get_item.with_any_args do |mids, get_opts|
-            mids.should be(msg_ids)
-            get_opts.should == {
-              :item_shape=>{
-                :base_shape=>:IdOnly, 
-                :additional_properties=>[[:field_uri, "item:ItemClass"],
-                                         [:field_uri, "item:DateTimeSent"],
-                                         [:field_uri, "item:DateTimeReceived"],
-                                         [:field_uri, "item:InReplyTo"],
-                                         [:field_uri, "message:InternetMessageId"],
-                                         [:field_uri, "message:References"],
-                                         [:field_uri, "message:From"],
-                                         [:field_uri, "message:Sender"],
-                                         [:field_uri, "message:ToRecipients"],
-                                         [:field_uri, "message:CcRecipients"],
-                                         [:field_uri, "message:BccRecipients"]]}}
-          end
-
-          c.get(folder_id, msg_ids)
-        end
-
-        it "should fetch message content if is_journal" do
-          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
-          stub(c).is_journal{true}
-
-          folder_id = Object.new
-          msg_ids = Object.new
-
-          mock(folder_id).get_item.with_any_args do |mids, get_opts|
+          mock(client).get_item.with_any_args do |mids, get_opts|
             mids.should be(msg_ids)
             get_opts.should == {
               :item_shape=>{
@@ -183,18 +156,53 @@ module Sonar
                                          [:field_uri, "message:ToRecipients"],
                                          [:field_uri, "message:CcRecipients"],
                                          [:field_uri, "message:BccRecipients"],
+                                         [:field_uri, "message:IsRead"],
+                                         [:field_uri, "message:IsReadReceiptRequested"]]}}
+          end
+
+          c.get(msg_ids)
+        end
+
+        it "should fetch message content if is_journal" do
+          c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          stub(c).is_journal{true}
+
+          client = Object.new
+          stub(c).client{client}
+          msg_ids = Object.new
+
+          mock(client).get_item.with_any_args do |mids, get_opts|
+            mids.should be(msg_ids)
+            get_opts.should == {
+              :item_shape=>{
+                :base_shape=>:IdOnly, 
+                :additional_properties=>[[:field_uri, "item:ItemClass"],
+                                         [:field_uri, "item:DateTimeSent"],
+                                         [:field_uri, "item:DateTimeReceived"],
+                                         [:field_uri, "item:InReplyTo"],
+                                         [:field_uri, "message:InternetMessageId"],
+                                         [:field_uri, "message:References"],
+                                         [:field_uri, "message:From"],
+                                         [:field_uri, "message:Sender"],
+                                         [:field_uri, "message:ToRecipients"],
+                                         [:field_uri, "message:CcRecipients"],
+                                         [:field_uri, "message:BccRecipients"],
+                                         [:field_uri, "message:IsRead"],
+                                         [:field_uri, "message:IsReadReceiptRequested"],
                                          [:field_uri, "item:MimeContent"]]}}
           end
 
-          c.get(folder_id, msg_ids)
+          c.get(msg_ids)
         end
       end
 
       describe "action" do
         it "should make a Rews find_item request, save, update state, delete" do
           c=Sonar::Connector::EwsPullConnector.new(two_folder_config('delete'=>true), @base_config)
+          client = Object.new
           state = {}
           stub(c).state{state}
+          stub(c).client{client}
           
           c.distinguished_folder_ids.each do |fid|
             msg_ids = Object.new
@@ -206,16 +214,20 @@ module Sonar
             mock(fid).find_item(anything){msg_ids}
 
             msgs = Object.new
-            mock(fid).get_item(msg_ids, anything){msgs}
+            mock(client).get_item(msg_ids, anything){msgs}
             
+            mock(c).suppress_read_receipt(msgs)
             mock(c).save_messages(msgs)
-            mock(c).delete_messages(fid, msg_ids)
+            mock(c).delete_messages(msg_ids)
           end
           c.action
         end
 
         it "should catch exceptions during message fetch and write any xml to an error file" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          client = Object.new
+          stub(c).client{client}
+
           fid = c.distinguished_folder_ids.first
 
           msg_ids = Object.new
@@ -234,10 +246,11 @@ module Sonar
           stub(exception).savon_response{savon_response}
 
           msgs = Object.new
-          mock(fid).get_item(msg_ids, anything){raise exception}
+          mock(client).get_item(msg_ids, anything){raise exception}
           mock(c.log).warn(/problem retrieving/)
           mock(c.log).warn(is_a(RuntimeError))
           
+          dont_allow(c).suppress_read_receipt(msgs)
           dont_allow(c).save_messages(msgs)
 
           mock(c.filestore).write(:error, "error.xml", "<tig><tag/></tig>")
@@ -249,6 +262,9 @@ module Sonar
 
         it "should catch exceptions during fetch and delete if 'delete' option is true" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config('delete'=>true), @base_config)
+          client = Object.new
+          stub(c).client{client}
+
           fid = c.distinguished_folder_ids.first
 
           msg_ids = Object.new
@@ -262,13 +278,14 @@ module Sonar
           mock(fid).find_item(anything){msg_ids}
           
           msgs = Object.new
-          mock(fid).get_item(msg_ids, anything){raise "boo"}
+          mock(client).get_item(msg_ids, anything){raise "boo"}
           mock(c.log).warn(/problem retrieving/)
           mock(c.log).warn(is_a(RuntimeError))
           mock(c.log).warn(/be deleted/)
           
+          dont_allow(c).suppress_read_receipt(msgs)
           dont_allow(c).save_messages(msgs)
-          mock(c).delete_messages(fid, msg_ids)
+          mock(c).delete_messages(msg_ids)
           
           c.action
 
@@ -277,6 +294,9 @@ module Sonar
 
         it "should have a single item:ItemClass Restriction clause if fstate is nil" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          client = Object.new
+          stub(c).client{client}
+
           fid = c.distinguished_folder_ids.first
 
           msg_ids = Object.new
@@ -291,7 +311,8 @@ module Sonar
           stub(msg_ids).last.stub!.[](:date_time_received){DateTime.now}
 
           msgs=Object.new
-          mock(fid).get_item(msg_ids, anything){msgs}
+          mock(client).get_item(msg_ids, anything){msgs}
+          mock(c).suppress_read_receipt(msgs)
           mock(c).save_messages(msgs)
 
           c.action
@@ -299,6 +320,8 @@ module Sonar
         
         it "should have a second item:DateTimeReceived Restriction clause if fstate is non-nil" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          client = Object.new
+          stub(c).client{client}
 
           fid = c.distinguished_folder_ids.first
 
@@ -320,7 +343,8 @@ module Sonar
           stub(msg_ids).last.stub!.[](:date_time_received){DateTime.now}
 
           msgs = Object.new
-          mock(fid).get_item(msg_ids, anything){msgs}
+          mock(client).get_item(msg_ids, anything){msgs}
+          mock(c).suppress_read_receipt(msgs)
           mock(c).save_messages(msgs)
 
           c.action
@@ -328,6 +352,8 @@ module Sonar
 
         it "should not cycle through messages with identical item:DateTimeRecieved if 'delete' option is true" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config('delete'=>true), @base_config)
+          client = Object.new
+          stub(c).client{client}
           
           fid = c.distinguished_folder_ids.first
 
@@ -346,16 +372,19 @@ module Sonar
             msg_ids
           end
 
-          mock(fid).get_item(msg_ids, anything){msgs}
+          mock(client).get_item(msg_ids, anything){msgs}
+          mock(c).suppress_read_receipt(msgs)
           mock(c).save_messages(msgs)
-          mock(c).delete_messages(fid, msg_ids)
+          mock(c).delete_messages(msg_ids)
 
           c.action
         end
 
         it "should cycle through messages with identical item:DateTimeReceived, so state is always updated if 'delete' option is false" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
-          
+          client = Object.new
+          stub(c).client{client}
+
           fid = c.distinguished_folder_ids.first
 
           state_time = (DateTime.now - 2).to_s
@@ -384,10 +413,12 @@ module Sonar
             end
           end
 
-          mock(fid).get_item(msg_ids, anything){msgs}
+          mock(client).get_item(msg_ids, anything){msgs}
+          mock(c).suppress_read_receipt(msgs)
           mock(c).save_messages(msgs)
 
-          mock(fid).get_item(more_msg_ids, anything){more_msgs}
+          mock(client).get_item(more_msg_ids, anything){more_msgs}
+          mock(c).suppress_read_receipt(more_msgs)
           mock(c).save_messages(more_msgs)
 
           c.action
@@ -395,7 +426,9 @@ module Sonar
 
         it "should terminate the fetch loop if no messages are returned" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
-          
+          client = Object.new
+          stub(c).client{client}
+
           fid = c.distinguished_folder_ids.first
 
           state_time = (DateTime.now - 1).to_s
@@ -560,14 +593,16 @@ module Sonar
       describe "delete_messages" do
         it "should HardDelete all messages from a result" do
           c=Sonar::Connector::EwsPullConnector.new(one_folder_config, @base_config)
+          client = Object.new
+          stub(c).client{client}
           fid = c.distinguished_folder_ids.first
 
           msgs = Object.new
           mock(msgs).length{1}
 
-          mock(fid).delete_item(msgs, :delete_type=>:HardDelete)
+          mock(client).delete_item(msgs, :delete_type=>:HardDelete)
 
-          c.delete_messages(fid, msgs)
+          c.delete_messages(msgs)
         end
       end
       

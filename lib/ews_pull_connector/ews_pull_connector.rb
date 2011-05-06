@@ -18,6 +18,7 @@ module Sonar
       attr_accessor :delete
       attr_accessor :is_journal
       attr_accessor :batch_size
+      attr_accessor :client
 
       def parse(settings)
         ["name", "repeat_delay", "url", "auth", "user", "password", "distinguished_folders", "batch_size"].each do |param|
@@ -75,7 +76,7 @@ module Sonar
         folder_id.find_item(find_opts)
       end
 
-      def get(folder_id, msg_ids)
+      def get(msg_ids)
         get_opts = {
           :item_shape=>{
             :base_shape=>:IdOnly, 
@@ -89,7 +90,9 @@ module Sonar
                                      [:field_uri, "message:Sender"],
                                      [:field_uri, "message:ToRecipients"],
                                      [:field_uri, "message:CcRecipients"],
-                                     [:field_uri, "message:BccRecipients"]]}}
+                                     [:field_uri, "message:BccRecipients"],
+                                     [:field_uri, "message:IsRead"],
+                                     [:field_uri, "message:IsReadReceiptRequested"]]}}
 
         # we have to retrieve the journal message content and unwrap the 
         # original message if this
@@ -98,7 +101,7 @@ module Sonar
           get_opts[:item_shape][:additional_properties] << [:field_uri, "item:MimeContent"]
         end
         
-        folder_id.get_item(msg_ids, get_opts)
+        client.get_item(msg_ids, get_opts)
       end
 
       def action
@@ -115,7 +118,9 @@ module Sonar
               state[fid.key] ||= msg_ids.first[:date_time_received].to_s if msg_ids.first[:date_time_received]
 
               begin
-                msgs = get(fid, msg_ids)
+                msgs = get(msg_ids)
+                # need to suppress any requested read receipts, even if we delete
+                suppress_read_receipt(msgs)
                 save_messages(msgs)
               rescue Exception=>e
                 log.warn("problem retrieving messages: #{msg_ids.inspect}")
@@ -129,7 +134,7 @@ module Sonar
                 state[fid.key] = msg_ids.last[:date_time_received].to_s
               end
               
-              delete_messages(fid, msg_ids) if delete
+              delete_messages(msg_ids) if delete
 
               offset += msg_ids.length
             end
@@ -214,9 +219,14 @@ module Sonar
         nil
       end
 
-      def delete_messages(folder_id, messages)
-        log.info "deleting #{messages.length} messages from #{folder_id.inspect}"
-        folder_id.delete_item(messages, :delete_type=>:HardDelete)
+      def suppress_read_receipt(messages)
+        log.info "suppressing any read receipts"
+        client.suppress_read_receipt(messages)
+      end
+
+      def delete_messages(messages)
+        log.info "deleting #{messages.length} messages"
+        client.delete_item(messages, :delete_type=>:HardDelete)
       end
     end
   end
