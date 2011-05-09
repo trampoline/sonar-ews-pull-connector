@@ -46,7 +46,7 @@ module Sonar
 
       def distinguished_folder_ids
         return @distinguished_folder_ids if @distinguished_folder_ids
-        client ||= Rews::Client.new(url, auth, user, password)
+        self.client ||= Rews::Client.new(url, auth, user, password)
 
         @distinguished_folder_ids = @distinguished_folders.inject([]) do |ids, (name, mailbox_email)|
           ids << client.distinguished_folder_id(name, mailbox_email)
@@ -63,7 +63,9 @@ module Sonar
             :offset=>offset},
           :item_shape=>{
             :base_shape=>:IdOnly,
-            :additional_properties=>[[:field_uri, "item:DateTimeReceived"]]}}
+            :additional_properties=>[[:field_uri, "item:DateTimeReceived"],
+                                     [:field_uri, "message:IsRead"],
+                                     [:field_uri, "message:IsReadReceiptRequested"]]}}
         
         restriction = [:==, "item:ItemClass", "IPM.Note"]
         if state[folder_id.key]
@@ -119,8 +121,6 @@ module Sonar
 
               begin
                 msgs = get(msg_ids)
-                # need to suppress any requested read receipts, even if we delete
-                suppress_read_receipt(msgs)
                 save_messages(msgs)
               rescue Exception=>e
                 log.warn("problem retrieving messages: #{msg_ids.inspect}")
@@ -134,6 +134,8 @@ module Sonar
                 state[fid.key] = msg_ids.last[:date_time_received].to_s
               end
               
+              # need to suppress any requested read receipts, even if we delete
+              suppress_read_receipt(msg_ids)
               delete_messages(msg_ids) if delete
 
               offset += msg_ids.length
